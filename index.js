@@ -1,4 +1,10 @@
-const { Client, GatewayIntentBits, ChannelType, PermissionFlagsBits } = require("discord.js");
+const {
+  Client,
+  GatewayIntentBits,
+  ChannelType,
+  PermissionFlagsBits,
+  EmbedBuilder
+} = require("discord.js");
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -11,7 +17,10 @@ client.once("ready", () => {
 client.on("guildCreate", async (guild) => {
   console.log(`Setting up ${guild.name}...`);
 
-  // Roles
+  // =========================
+  // ROLES
+  // =========================
+
   const roles = [
     { name: "Owner", color: 0xff0000 },
     { name: "Admin", color: 0xff7a00 },
@@ -28,7 +37,10 @@ client.on("guildCreate", async (guild) => {
     }
   }
 
-  // Server layout
+  // =========================
+  // SERVER LAYOUT
+  // =========================
+
   const categories = {
     "📌 IMPORTANT": [
       "👋・hello",
@@ -75,9 +87,16 @@ client.on("guildCreate", async (guild) => {
     ]
   };
 
+  // =========================
+  // CREATE CATEGORIES + CHANNELS
+  // =========================
+
   for (const [categoryName, channels] of Object.entries(categories)) {
+
     let category = guild.channels.cache.find(
-      c => c.name === categoryName && c.type === ChannelType.GuildCategory
+      c =>
+        c.name === categoryName &&
+        c.type === ChannelType.GuildCategory
     );
 
     if (!category) {
@@ -88,11 +107,87 @@ client.on("guildCreate", async (guild) => {
     }
 
     for (const channelName of channels) {
-      if (!guild.channels.cache.find(c => c.name === channelName)) {
-        await guild.channels.create({
+
+      let channel = guild.channels.cache.find(
+        c => c.name === channelName
+      );
+
+      if (!channel) {
+        channel = await guild.channels.create({
           name: channelName,
           type: ChannelType.GuildText,
           parent: category.id
+        });
+      }
+
+      // =========================
+      // RULES CHANNEL
+      // =========================
+
+      if (channelName === "📜・rules") {
+
+        // Make rules read-only for @everyone
+        await channel.permissionOverwrites.edit(
+          guild.roles.everyone,
+          {
+            SendMessages: false,
+            AddReactions: false
+          }
+        );
+
+        // Let staff continue posting
+        const staffRoles = ["Owner", "Admin", "Moderator"];
+
+        for (const roleName of staffRoles) {
+          const role = guild.roles.cache.find(
+            r => r.name === roleName
+          );
+
+          if (role) {
+            await channel.permissionOverwrites.edit(role, {
+              SendMessages: true,
+              AddReactions: true
+            });
+          }
+        }
+
+        // =========================
+        // RULES MESSAGE
+        // =========================
+
+        const rulesEmbed = new EmbedBuilder()
+          .setTitle("📜 SERVER RULES")
+          .setDescription(
+`**1. Be respectful**
+No harassment, hate speech, or personal attacks.
+
+**2. No spam**
+Don't flood chats, mass mention, or abuse commands.
+
+**3. No NSFW content**
+Keep the server appropriate.
+
+**4. No advertising**
+Don't advertise other servers, services, or accounts without permission.
+
+**5. No scams or malicious content**
+No phishing, malware, fraud, or suspicious links.
+
+**6. Follow Discord's rules**
+You must follow Discord's Terms of Service and Community Guidelines.
+
+**7. Listen to staff**
+Staff decisions should be respected. If you disagree, contact an administrator privately.
+
+**⚠️ Breaking the rules can result in a warning, timeout, kick, or ban.**`
+          )
+          .setFooter({
+            text: "Please follow the rules and enjoy the server!"
+          })
+          .setTimestamp();
+
+        await channel.send({
+          embeds: [rulesEmbed]
         });
       }
     }
