@@ -13,94 +13,137 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
+const SERVER_ID = "1539348072188874762";
+
 const setupCommand = new SlashCommandBuilder()
   .setName("setup")
-  .setDescription("Sets up the server and posts the rules.");
+  .setDescription("Automatically sets up the server.");
 
-async function setupServer(guild) {
-  // Roles
+const categories = {
+  "📌 IMPORTANT": [
+    "👋・hello",
+    "📜・rules",
+    "📢・news",
+    "✅・verify"
+  ],
+
+  "💬 COMMUNITY": [
+    "💬・general",
+    "🖼️・media",
+    "🤖・commands"
+  ],
+
+  "⭐ KN × PROJECT": [
+    "kn-x-ryven",
+    "kn-x-starlight",
+    "kn-x-kyro"
+  ],
+
+  "ℹ️ INFO": [
+    "faq",
+    "apk-available-servers"
+  ],
+
+  "🆘 HELP": [
+    "public-support",
+    "tickets",
+    "support-application"
+  ],
+
+  "🛡️ STAFF": [
+    "staff-hub",
+    "🔒・staff-chat"
+  ],
+
+  "🎫 TICKETS": [
+    "ticket-info"
+  ],
+
+  "📝 SUBMISSIONS": [
+    "🔒・pending",
+    "🔒・accepted"
+  ]
+};
+
+
+// ==========================================
+// CREATE ROLES
+// ==========================================
+
+async function createRoles(guild) {
   const roles = [
-    { name: "Owner", color: 0xff0000 },
-    { name: "Admin", color: 0xff7a00 },
-    { name: "Moderator", color: 0x3498db },
-    { name: "Member", color: 0x95a5a6 }
+    {
+      name: "Owner",
+      color: 0xff0000
+    },
+    {
+      name: "Admin",
+      color: 0xff7a00
+    },
+    {
+      name: "Moderator",
+      color: 0x3498db
+    },
+    {
+      name: "Member",
+      color: 0x95a5a6
+    }
   ];
 
-  for (const role of roles) {
-    if (!guild.roles.cache.some(r => r.name === role.name)) {
+  for (const roleInfo of roles) {
+    const existingRole = guild.roles.cache.find(
+      role => role.name === roleInfo.name
+    );
+
+    if (!existingRole) {
       await guild.roles.create({
-        name: role.name,
-        color: role.color
+        name: roleInfo.name,
+        color: roleInfo.color,
+        reason: "Automatic server setup"
       });
     }
   }
+}
 
-  // Categories and channels
-  const categories = {
-    "📌 IMPORTANT": [
-      "👋・hello",
-      "📜・rules",
-      "📢・news",
-      "✅・verify"
-    ],
-    "💬 COMMUNITY": [
-      "💬・general",
-      "🖼️・media",
-      "🤖・commands"
-    ],
-    "⭐ KN × PROJECT": [
-      "kn-x-ryven",
-      "kn-x-starlight",
-      "kn-x-kyro"
-    ],
-    "ℹ️ INFO": [
-      "faq",
-      "apk-available-servers"
-    ],
-    "🆘 HELP": [
-      "public-support",
-      "tickets",
-      "support-application"
-    ],
-    "🛡️ STAFF": [
-      "staff-hub",
-      "🔒・staff-chat"
-    ],
-    "🎫 TICKETS": [
-      "ticket-info"
-    ],
-    "📝 SUBMISSIONS": [
-      "🔒・pending",
-      "🔒・accepted"
-    ]
-  };
 
-  let rulesChannel;
+// ==========================================
+// CREATE CHANNELS
+// ==========================================
 
-  for (const [categoryName, channels] of Object.entries(categories)) {
+async function createChannels(guild) {
+
+  let rulesChannel = null;
+
+  for (const [categoryName, channelNames] of Object.entries(categories)) {
+
     let category = guild.channels.cache.find(
-      c =>
-        c.type === ChannelType.GuildCategory &&
-        c.name === categoryName
+      channel =>
+        channel.type === ChannelType.GuildCategory &&
+        channel.name === categoryName
     );
 
     if (!category) {
       category = await guild.channels.create({
         name: categoryName,
-        type: ChannelType.GuildCategory
+        type: ChannelType.GuildCategory,
+        reason: "Automatic server setup"
       });
     }
 
-    for (const channelName of channels) {
+    for (const channelName of channelNames) {
+
       let channel = guild.channels.cache.find(
-        c => c.name === channelName
+        channel =>
+          channel.type === ChannelType.GuildText &&
+          channel.name === channelName
       );
 
       if (!channel) {
         channel = await guild.channels.create({
           name: channelName,
           type: ChannelType.GuildText,
-          parent: category.id
+          parent: category.id,
+          reason: "Automatic server setup"
         });
       }
 
@@ -110,20 +153,30 @@ async function setupServer(guild) {
     }
   }
 
-  // Rules channel permissions
-  if (rulesChannel) {
-    await rulesChannel.permissionOverwrites.edit(
-      guild.roles.everyone,
-      {
-        SendMessages: false,
-        AddReactions: false
-      }
-    );
+  return rulesChannel;
+}
 
-    // Exact rules
-    const rulesEmbed = new EmbedBuilder()
-      .setTitle("📜 SERVER RULES")
-      .setDescription(
+
+// ==========================================
+// RULES
+// ==========================================
+
+async function setupRules(guild, rulesChannel) {
+
+  if (!rulesChannel) return;
+
+  // Members cannot send messages in rules
+  await rulesChannel.permissionOverwrites.edit(
+    guild.roles.everyone,
+    {
+      SendMessages: false,
+      AddReactions: false
+    }
+  );
+
+  const rulesEmbed = new EmbedBuilder()
+    .setTitle("📜 SERVER RULES")
+    .setDescription(
 `**1. Be respectful**
 No harassment, hate speech, or personal attacks.
 
@@ -146,78 +199,160 @@ You must follow Discord's Terms of Service and Community Guidelines.
 Staff decisions should be respected. If you disagree, contact an administrator privately.
 
 **⚠️ Breaking the rules can result in a warning, timeout, kick, or ban.`
-      )
-      .setFooter({
-        text: "Please follow the rules and enjoy the server!"
-      })
-      .setTimestamp();
+    )
+    .setFooter({
+      text: "Please follow the rules and enjoy the server!"
+    })
+    .setTimestamp();
 
+  // Prevent duplicate rules messages
+  const messages = await rulesChannel.messages.fetch({
+    limit: 50
+  });
+
+  const alreadyPosted = messages.some(
+    message =>
+      message.author.id === client.user.id &&
+      message.embeds.length > 0 &&
+      message.embeds[0].title === "📜 SERVER RULES"
+  );
+
+  if (!alreadyPosted) {
     await rulesChannel.send({
       embeds: [rulesEmbed]
     });
   }
 }
 
+
+// ==========================================
+// FULL SERVER SETUP
+// ==========================================
+
+async function setupServer(guild) {
+
+  console.log(`Starting setup for ${guild.name}...`);
+
+  await createRoles(guild);
+
+  const rulesChannel = await createChannels(guild);
+
+  await setupRules(guild, rulesChannel);
+
+  console.log(`Setup complete for ${guild.name}.`);
+}
+
+
+// ==========================================
+// BOT READY
+// ==========================================
+
 client.once("ready", async () => {
+
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Register /setup command
-  const rest = new REST({ version: "10" })
-    .setToken(process.env.DISCORD_TOKEN);
+  const rest = new REST({
+    version: "10"
+  }).setToken(process.env.DISCORD_TOKEN);
 
   try {
+
     await rest.put(
-      Routes.applicationCommands(client.user.id),
+      Routes.applicationGuildCommands(
+        client.user.id,
+        SERVER_ID
+      ),
       {
         body: [setupCommand.toJSON()]
       }
     );
 
-    console.log("Registered /setup command.");
+    console.log("✅ /setup registered successfully.");
+
   } catch (error) {
+
+    console.error("❌ Failed to register /setup:");
     console.error(error);
   }
 });
 
-// /setup command
+
+// ==========================================
+// /SETUP COMMAND
+// ==========================================
+
 client.on("interactionCreate", async interaction => {
+
   if (!interaction.isChatInputCommand()) return;
+
   if (interaction.commandName !== "setup") return;
 
-  if (!interaction.memberPermissions.has(
-    PermissionFlagsBits.Administrator
-  )) {
+  if (!interaction.guild) {
     return interaction.reply({
-      content: "❌ You need Administrator permission to use this command.",
+      content: "❌ This command can only be used inside a server.",
       ephemeral: true
     });
   }
 
-  await interaction.reply("⚙️ Setting up the server...");
+  if (
+    !interaction.memberPermissions.has(
+      PermissionFlagsBits.Administrator
+    )
+  ) {
+    return interaction.reply({
+      content: "❌ You need Administrator permission to use `/setup`.",
+      ephemeral: true
+    });
+  }
+
+  await interaction.reply({
+    content: "⚙️ Setting up the server..."
+  });
 
   try {
+
     await setupServer(interaction.guild);
 
     await interaction.editReply(
-      "✅ Server setup complete! Check the `📜・rules` channel."
+      "✅ **Setup complete!** Check the categories and `📜・rules` channel."
     );
+
   } catch (error) {
+
     console.error(error);
 
     await interaction.editReply(
-      "❌ Something went wrong while setting up the server."
+      "❌ Something went wrong. Check the Railway logs."
     );
   }
 });
 
-// Automatically setup when the bot joins a NEW server
+
+// ==========================================
+// AUTOMATIC SETUP WHEN BOT JOINS
+// ==========================================
+
 client.on("guildCreate", async guild => {
+
+  console.log(`Bot joined ${guild.name}.`);
+
   try {
+
     await setupServer(guild);
-    console.log(`Automatically set up ${guild.name}`);
+
   } catch (error) {
+
+    console.error(
+      `❌ Automatic setup failed for ${guild.name}:`
+    );
+
     console.error(error);
   }
 });
+
+
+// ==========================================
+// LOGIN
+// ==========================================
 
 client.login(process.env.DISCORD_TOKEN);
