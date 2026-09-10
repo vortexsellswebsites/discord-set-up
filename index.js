@@ -3,24 +3,22 @@ const {
   GatewayIntentBits,
   ChannelType,
   PermissionFlagsBits,
-  EmbedBuilder
+  EmbedBuilder,
+  SlashCommandBuilder,
+  REST,
+  Routes
 } = require("discord.js");
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-client.once("ready", () => {
-  console.log(`Logged in as ${client.user.tag}`);
-});
+const setupCommand = new SlashCommandBuilder()
+  .setName("setup")
+  .setDescription("Sets up the server and posts the rules.");
 
-client.on("guildCreate", async (guild) => {
-  console.log(`Setting up ${guild.name}...`);
-
-  // =========================
-  // ROLES
-  // =========================
-
+async function setupServer(guild) {
+  // Roles
   const roles = [
     { name: "Owner", color: 0xff0000 },
     { name: "Admin", color: 0xff7a00 },
@@ -29,7 +27,7 @@ client.on("guildCreate", async (guild) => {
   ];
 
   for (const role of roles) {
-    if (!guild.roles.cache.find(r => r.name === role.name)) {
+    if (!guild.roles.cache.some(r => r.name === role.name)) {
       await guild.roles.create({
         name: role.name,
         color: role.color
@@ -37,10 +35,7 @@ client.on("guildCreate", async (guild) => {
     }
   }
 
-  // =========================
-  // SERVER LAYOUT
-  // =========================
-
+  // Categories and channels
   const categories = {
     "📌 IMPORTANT": [
       "👋・hello",
@@ -48,55 +43,45 @@ client.on("guildCreate", async (guild) => {
       "📢・news",
       "✅・verify"
     ],
-
     "💬 COMMUNITY": [
       "💬・general",
       "🖼️・media",
       "🤖・commands"
     ],
-
     "⭐ KN × PROJECT": [
       "kn-x-ryven",
       "kn-x-starlight",
       "kn-x-kyro"
     ],
-
     "ℹ️ INFO": [
       "faq",
       "apk-available-servers"
     ],
-
     "🆘 HELP": [
       "public-support",
       "tickets",
       "support-application"
     ],
-
     "🛡️ STAFF": [
       "staff-hub",
       "🔒・staff-chat"
     ],
-
     "🎫 TICKETS": [
       "ticket-info"
     ],
-
     "📝 SUBMISSIONS": [
       "🔒・pending",
       "🔒・accepted"
     ]
   };
 
-  // =========================
-  // CREATE CATEGORIES + CHANNELS
-  // =========================
+  let rulesChannel;
 
   for (const [categoryName, channels] of Object.entries(categories)) {
-
     let category = guild.channels.cache.find(
       c =>
-        c.name === categoryName &&
-        c.type === ChannelType.GuildCategory
+        c.type === ChannelType.GuildCategory &&
+        c.name === categoryName
     );
 
     if (!category) {
@@ -107,7 +92,6 @@ client.on("guildCreate", async (guild) => {
     }
 
     for (const channelName of channels) {
-
       let channel = guild.channels.cache.find(
         c => c.name === channelName
       );
@@ -120,44 +104,26 @@ client.on("guildCreate", async (guild) => {
         });
       }
 
-      // =========================
-      // RULES CHANNEL
-      // =========================
-
       if (channelName === "📜・rules") {
+        rulesChannel = channel;
+      }
+    }
+  }
 
-        // Make rules read-only for @everyone
-        await channel.permissionOverwrites.edit(
-          guild.roles.everyone,
-          {
-            SendMessages: false,
-            AddReactions: false
-          }
-        );
+  // Rules channel permissions
+  if (rulesChannel) {
+    await rulesChannel.permissionOverwrites.edit(
+      guild.roles.everyone,
+      {
+        SendMessages: false,
+        AddReactions: false
+      }
+    );
 
-        // Let staff continue posting
-        const staffRoles = ["Owner", "Admin", "Moderator"];
-
-        for (const roleName of staffRoles) {
-          const role = guild.roles.cache.find(
-            r => r.name === roleName
-          );
-
-          if (role) {
-            await channel.permissionOverwrites.edit(role, {
-              SendMessages: true,
-              AddReactions: true
-            });
-          }
-        }
-
-        // =========================
-        // RULES MESSAGE
-        // =========================
-
-        const rulesEmbed = new EmbedBuilder()
-          .setTitle("📜 SERVER RULES")
-          .setDescription(
+    // Exact rules
+    const rulesEmbed = new EmbedBuilder()
+      .setTitle("📜 SERVER RULES")
+      .setDescription(
 `**1. Be respectful**
 No harassment, hate speech, or personal attacks.
 
@@ -179,21 +145,79 @@ You must follow Discord's Terms of Service and Community Guidelines.
 **7. Listen to staff**
 Staff decisions should be respected. If you disagree, contact an administrator privately.
 
-**⚠️ Breaking the rules can result in a warning, timeout, kick, or ban.**`
-          )
-          .setFooter({
-            text: "Please follow the rules and enjoy the server!"
-          })
-          .setTimestamp();
+**⚠️ Breaking the rules can result in a warning, timeout, kick, or ban.`
+      )
+      .setFooter({
+        text: "Please follow the rules and enjoy the server!"
+      })
+      .setTimestamp();
 
-        await channel.send({
-          embeds: [rulesEmbed]
-        });
+    await rulesChannel.send({
+      embeds: [rulesEmbed]
+    });
+  }
+}
+
+client.once("ready", async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+
+  // Register /setup command
+  const rest = new REST({ version: "10" })
+    .setToken(process.env.DISCORD_TOKEN);
+
+  try {
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      {
+        body: [setupCommand.toJSON()]
       }
-    }
+    );
+
+    console.log("Registered /setup command.");
+  } catch (error) {
+    console.error(error);
+  }
+});
+
+// /setup command
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== "setup") return;
+
+  if (!interaction.memberPermissions.has(
+    PermissionFlagsBits.Administrator
+  )) {
+    return interaction.reply({
+      content: "❌ You need Administrator permission to use this command.",
+      ephemeral: true
+    });
   }
 
-  console.log(`${guild.name} setup complete!`);
+  await interaction.reply("⚙️ Setting up the server...");
+
+  try {
+    await setupServer(interaction.guild);
+
+    await interaction.editReply(
+      "✅ Server setup complete! Check the `📜・rules` channel."
+    );
+  } catch (error) {
+    console.error(error);
+
+    await interaction.editReply(
+      "❌ Something went wrong while setting up the server."
+    );
+  }
+});
+
+// Automatically setup when the bot joins a NEW server
+client.on("guildCreate", async guild => {
+  try {
+    await setupServer(guild);
+    console.log(`Automatically set up ${guild.name}`);
+  } catch (error) {
+    console.error(error);
+  }
 });
 
 client.login(process.env.DISCORD_TOKEN);
